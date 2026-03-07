@@ -972,12 +972,12 @@ static FDDGITexturePixels GetTexturePixelsStep1_RenderThread(FRHICommandListImme
 	// Early out if a GPU texture is not provided
 	if (!textureGPU) return ret;
 
-	ret.Desc.Width = textureGPU->GetTexture2D()->GetSizeX();
-	ret.Desc.Height = textureGPU->GetTexture2D()->GetSizeY();
+	ret.Desc.Width = textureGPU->GetSizeX();
+	ret.Desc.Height = textureGPU->GetSizeY();
 	ret.Desc.PixelFormat = (int32)textureGPU->GetFormat();
 
 	// Create the texture
-	FRHITextureCreateDesc CreateInfo = FRHITextureCreateDesc::Create2D(TEXT("DDGIGetTexturePixelsSave"), ret.Desc.Width,ret.Desc.Height, textureGPU->GetFormat());
+	FRHITextureCreateDesc CreateInfo = FRHITextureCreateDesc::Create2D(TEXT("DDGIGetTexturePixelsSave"), ret.Desc.Width, ret.Desc.Height, textureGPU->GetFormat());
 	CreateInfo.AddFlags(TexCreate_ShaderResource);
 
 	CreateInfo.InitialState = ERHIAccess::CopyDest;
@@ -987,7 +987,10 @@ static FDDGITexturePixels GetTexturePixelsStep1_RenderThread(FRHICommandListImme
 	RHICmdList.Transition(FRHITransitionInfo(textureGPU, ERHIAccess::SRVMask, ERHIAccess::CopySrc));
 
 	// Schedule a copy of the GPU texture to the CPU accessible GPU texture
-	RHICmdList.CopyTexture(textureGPU, ret.Texture, FRHICopyTextureInfo{});
+	// Use explicit copy size to prevent mismatch between queried size and D3D12 resource dimensions
+	FRHICopyTextureInfo CopyInfo;
+	CopyInfo.Size = FIntVector(ret.Desc.Width, ret.Desc.Height, 1);
+	RHICmdList.CopyTexture(textureGPU, ret.Texture, CopyInfo);
 
 	// Transition the GPU texture back to general
 	RHICmdList.Transition(FRHITransitionInfo(textureGPU, ERHIAccess::CopySrc, ERHIAccess::SRVMask));
@@ -1217,20 +1220,28 @@ void UDDGIVolumeComponent::UpdateRenderThreadData()
 		ComponentData.ProbeMaxRayDistance = ProbeMaxRayDistance;
 		ComponentData.LightingChannels = LightingChannels;
 
-		// If the passed in ProbeCounts creates a radiance and distance texture that is too large then revert to previous valid probe counts
-		// Or if the distance texture is too large then revert to previous valid probe counts as well
+		// If the passed in ProbeCounts creates a texture atlas that is too large then revert to previous valid probe counts
 		volatile uint32 maxTextureSize = GetMax2DTextureDimension();
 		FIntPoint RadianceAndDistanceTextureAtlasDimensions = GetRadianceAndDistanceTextureDimensions(RaysPerProbe, ProbeCounts);
+		FIntPoint IrradianceTextureDimensions = GetIrradianceTextureDimensions(ProbeCounts);
 		FIntPoint DistanceTextureDimensions = GetDistanceTextureDimensions(ProbeCounts);
 		if (uint32(RadianceAndDistanceTextureAtlasDimensions.X) > maxTextureSize || uint32(RadianceAndDistanceTextureAtlasDimensions.Y) > maxTextureSize ||
+			uint32(IrradianceTextureDimensions.X) > maxTextureSize || uint32(IrradianceTextureDimensions.Y) > maxTextureSize ||
 			uint32(DistanceTextureDimensions.X) > maxTextureSize || uint32(DistanceTextureDimensions.Y) > maxTextureSize)
 		{
 			ProbeCounts = PrevProbeCounts;
+			UE_LOG(LogTemp, Warning, TEXT("DDGI: ProbeCounts exceeds maximum texture dimensions (%u). Reverting to previous valid counts (%d, %d, %d)."),
+				maxTextureSize, ProbeCounts.X, ProbeCounts.Y, ProbeCounts.Z);
 		}
 		else
 		{
 			PrevProbeCounts = ProbeCounts;
 		}
+
+		// Safety: ensure ProbeCounts is never zero on any axis (e.g. if PrevProbeCounts was uninitialized)
+		ProbeCounts.X = FMath::Max(ProbeCounts.X, 1);
+		ProbeCounts.Y = FMath::Max(ProbeCounts.Y, 1);
+		ProbeCounts.Z = FMath::Max(ProbeCounts.Z, 1);
 
 		ComponentData.ProbeCounts = ProbeCounts;
 		ComponentData.ProbeDistanceExponent = probeDistanceExponent;

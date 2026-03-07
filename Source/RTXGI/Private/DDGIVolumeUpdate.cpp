@@ -139,6 +139,17 @@ static FMatrix44f ComputeRandomRotation()
 	);
 }
 
+// Helper to build FRHICopyTextureInfo with explicit size from the minimum of source and dest dimensions
+static FRHICopyTextureInfo MakeSafeCopyInfo(FRHITexture* Src, FRHITexture* Dst)
+{
+	FRHICopyTextureInfo CopyInfo;
+	CopyInfo.Size = FIntVector(
+		FMath::Min((int32)Src->GetSizeX(), (int32)Dst->GetSizeX()),
+		FMath::Min((int32)Src->GetSizeY(), (int32)Dst->GetSizeY()),
+		1);
+	return CopyInfo;
+}
+
 static void LoadVolumeTextures_RenderThread(FRDGBuilder& GraphBuilder, FDDGIVolumeSceneProxy* proxy)
 {
 	if (!proxy->TextureLoadContext.ReadyForLoad)
@@ -146,26 +157,46 @@ static void LoadVolumeTextures_RenderThread(FRDGBuilder& GraphBuilder, FDDGIVolu
 
 	if (proxy->TextureLoadContext.Irradiance.Texture)
 	{
-		TRefCountPtr<IPooledRenderTarget> IrradianceLoaded = CreateRenderTarget(proxy->TextureLoadContext.Irradiance.Texture.GetReference(), TEXT("DDGIIrradianceLoaded"));
-		AddCopyTexturePass(GraphBuilder, GraphBuilder.RegisterExternalTexture(IrradianceLoaded), GraphBuilder.RegisterExternalTexture(proxy->ProbesIrradiance), FRHICopyTextureInfo{});
+		FRHITexture* SrcTex = proxy->TextureLoadContext.Irradiance.Texture.GetReference();
+		FRHITexture* DstTex = proxy->ProbesIrradiance->GetRHI();
+		if (SrcTex->GetSizeX() == DstTex->GetSizeX() && SrcTex->GetSizeY() == DstTex->GetSizeY())
+		{
+			TRefCountPtr<IPooledRenderTarget> IrradianceLoaded = CreateRenderTarget(SrcTex, TEXT("DDGIIrradianceLoaded"));
+			AddCopyTexturePass(GraphBuilder, GraphBuilder.RegisterExternalTexture(IrradianceLoaded), GraphBuilder.RegisterExternalTexture(proxy->ProbesIrradiance), MakeSafeCopyInfo(SrcTex, DstTex));
+		}
 	}
 
 	if (proxy->TextureLoadContext.Distance.Texture)
 	{
-		TRefCountPtr<IPooledRenderTarget> DistanceLoaded = CreateRenderTarget(proxy->TextureLoadContext.Distance.Texture.GetReference(), TEXT("DDGIDistanceLoaded"));
-		AddCopyTexturePass(GraphBuilder, GraphBuilder.RegisterExternalTexture(DistanceLoaded), GraphBuilder.RegisterExternalTexture(proxy->ProbesDistance), FRHICopyTextureInfo{});
+		FRHITexture* SrcTex = proxy->TextureLoadContext.Distance.Texture.GetReference();
+		FRHITexture* DstTex = proxy->ProbesDistance->GetRHI();
+		if (SrcTex->GetSizeX() == DstTex->GetSizeX() && SrcTex->GetSizeY() == DstTex->GetSizeY())
+		{
+			TRefCountPtr<IPooledRenderTarget> DistanceLoaded = CreateRenderTarget(SrcTex, TEXT("DDGIDistanceLoaded"));
+			AddCopyTexturePass(GraphBuilder, GraphBuilder.RegisterExternalTexture(DistanceLoaded), GraphBuilder.RegisterExternalTexture(proxy->ProbesDistance), MakeSafeCopyInfo(SrcTex, DstTex));
+		}
 	}
 
 	if (proxy->TextureLoadContext.Offsets.Texture && proxy->ProbesOffsets)
 	{
-		TRefCountPtr<IPooledRenderTarget> OffsetsLoaded = CreateRenderTarget(proxy->TextureLoadContext.Offsets.Texture.GetReference(), TEXT("DDGIOffsetsLoaded"));
-		AddCopyTexturePass(GraphBuilder, GraphBuilder.RegisterExternalTexture(OffsetsLoaded), GraphBuilder.RegisterExternalTexture(proxy->ProbesOffsets), FRHICopyTextureInfo{});
+		FRHITexture* SrcTex = proxy->TextureLoadContext.Offsets.Texture.GetReference();
+		FRHITexture* DstTex = proxy->ProbesOffsets->GetRHI();
+		if (SrcTex->GetSizeX() == DstTex->GetSizeX() && SrcTex->GetSizeY() == DstTex->GetSizeY())
+		{
+			TRefCountPtr<IPooledRenderTarget> OffsetsLoaded = CreateRenderTarget(SrcTex, TEXT("DDGIOffsetsLoaded"));
+			AddCopyTexturePass(GraphBuilder, GraphBuilder.RegisterExternalTexture(OffsetsLoaded), GraphBuilder.RegisterExternalTexture(proxy->ProbesOffsets), MakeSafeCopyInfo(SrcTex, DstTex));
+		}
 	}
 
 	if (proxy->TextureLoadContext.States.Texture && proxy->ProbesStates)
 	{
-		TRefCountPtr<IPooledRenderTarget> StatesLoaded = CreateRenderTarget(proxy->TextureLoadContext.States.Texture.GetReference(), TEXT("DDGIStatesLoaded"));
-		AddCopyTexturePass(GraphBuilder, GraphBuilder.RegisterExternalTexture(StatesLoaded), GraphBuilder.RegisterExternalTexture(proxy->ProbesStates), FRHICopyTextureInfo{});
+		FRHITexture* SrcTex = proxy->TextureLoadContext.States.Texture.GetReference();
+		FRHITexture* DstTex = proxy->ProbesStates->GetRHI();
+		if (SrcTex->GetSizeX() == DstTex->GetSizeX() && SrcTex->GetSizeY() == DstTex->GetSizeY())
+		{
+			TRefCountPtr<IPooledRenderTarget> StatesLoaded = CreateRenderTarget(SrcTex, TEXT("DDGIStatesLoaded"));
+			AddCopyTexturePass(GraphBuilder, GraphBuilder.RegisterExternalTexture(StatesLoaded), GraphBuilder.RegisterExternalTexture(proxy->ProbesStates), MakeSafeCopyInfo(SrcTex, DstTex));
+		}
 	}
 
 	proxy->TextureLoadContext.Clear();
@@ -1221,7 +1252,7 @@ void DebugShaderPlatformsDetailed()
 }
 #endif //!(UE_BUILD_SHIPPING || UE_BUILD_TEST)
 
-	void DDGIUpdateVolume_RenderThread_RTRadiance(const FScene& Scene, const FViewInfo& View, FRDGBuilder& GraphBuilder, FDDGIVolumeSceneProxy* VolProxy, const FMatrix44f& ProbeRayRotationTransform, FRDGTextureRef ProbesRadianceTex, FRDGTextureUAVRef ProbesRadianceUAV, bool highBitCount, bool bPartialUpdate = false)
+	void DDGIUpdateVolume_RenderThread_RTRadiance(const FScene& Scene, const FViewInfo& View, FRDGBuilder& GraphBuilder, FDDGIVolumeSceneProxy* VolProxy, const FMatrix44f& ProbeRayRotationTransform, FRDGTextureRef ProbesRadianceTex, FRDGTextureUAVRef ProbesRadianceUAV, bool highBitCount, bool bPartialUpdate)
 	{
 		// Deal with probe ray budgets, and updating probes in a round robin fashion within the volume
 		int ProbeUpdateRayBudget = GetDefault<URTXGIPluginSettings>()->ProbeUpdateRayBudget;
@@ -1265,7 +1296,7 @@ void DebugShaderPlatformsDetailed()
 		PassParameters->Scene = GetSceneUniformBufferRef(GraphBuilder, View);
 		PassParameters->NaniteRayTracing = Nanite::GetPublicGlobalRayTracingUniformBuffer();
 		
-		PassParameters->TLAS = Scene.RayTracingScene.GetLayerView(ERayTracingSceneLayer::Base, View.GetRayTracingSceneViewHandle());
+		PassParameters->TLAS = Scene.RayTracingScene.GetLayerView(ERayTracingSceneLayer::Base);
 		PassParameters->RadianceOutput = ProbesRadianceUAV;
 		PassParameters->FrameRandomSeed = GFrameNumber;
 		PassParameters->RayTracingLightGridUniformBuffer = View.RayTracingLightGridUniformBuffer;
@@ -1384,7 +1415,7 @@ void DebugShaderPlatformsDetailed()
 		);
 	}
 
-	void DDGIUpdateVolume_RenderThread_IrradianceBlend(const FViewInfo& View, FRDGBuilder& GraphBuilder, FDDGIVolumeSceneProxy* VolProxy, const FMatrix44f& ProbeRayRotationTransform, FRDGTextureUAVRef ProbesRadianceUAV, bool highBitCount, bool bPartialUpdate = false)
+	void DDGIUpdateVolume_RenderThread_IrradianceBlend(const FViewInfo& View, FRDGBuilder& GraphBuilder, FDDGIVolumeSceneProxy* VolProxy, const FMatrix44f& ProbeRayRotationTransform, FRDGTextureUAVRef ProbesRadianceUAV, bool highBitCount, bool bPartialUpdate)
 	{
 		//EShaderPlatform ShaderPlatform = GShaderPlatformForFeatureLevel[ERHIFeatureLevel::SM5];
 
@@ -1442,7 +1473,7 @@ void DebugShaderPlatformsDetailed()
 			VolProxy->ProbesIrradiance->GetTargetableRHI()->GetTexture2D()->GetSizeXY(),
 			VolProxy->ProbesIrradiance->GetTargetableRHI()->GetFormat(),
 #else
-			VolProxy->ProbesIrradiance->GetRHI()->GetTexture2D()->GetSizeXY(),
+			VolProxy->ProbesIrradiance->GetRHI()->GetSizeXY(),
 			VolProxy->ProbesIrradiance->GetRHI()->GetFormat(),
 #endif
 			FClearValueBinding::None,
@@ -1460,7 +1491,7 @@ void DebugShaderPlatformsDetailed()
 		);
 	}
 
-	void DDGIUpdateVolume_RenderThread_DistanceBlend(const FViewInfo& View, FRDGBuilder& GraphBuilder, FDDGIVolumeSceneProxy* VolProxy, const FMatrix44f& ProbeRayRotationTransform, FRDGTextureUAVRef ProbesRadianceUAV, bool highBitCount, bool bPartialUpdate = false)
+	void DDGIUpdateVolume_RenderThread_DistanceBlend(const FViewInfo& View, FRDGBuilder& GraphBuilder, FDDGIVolumeSceneProxy* VolProxy, const FMatrix44f& ProbeRayRotationTransform, FRDGTextureUAVRef ProbesRadianceUAV, bool highBitCount, bool bPartialUpdate)
 	{
 		//EShaderPlatform ShaderPlatform = GShaderPlatformForFeatureLevel[ERHIFeatureLevel::SM5];
 
@@ -1517,7 +1548,7 @@ void DebugShaderPlatformsDetailed()
 			VolProxy->ProbesDistance->GetTargetableRHI()->GetTexture2D()->GetSizeXY(),
 			VolProxy->ProbesDistance->GetTargetableRHI()->GetFormat(),
 #else
-			VolProxy->ProbesDistance->GetRHI()->GetTexture2D()->GetSizeXY(),
+			VolProxy->ProbesDistance->GetRHI()->GetSizeXY(),
 			VolProxy->ProbesDistance->GetRHI()->GetFormat(),
 #endif
 			FClearValueBinding::None,
@@ -1820,7 +1851,7 @@ FRHIRayTracingScene* FViewInfo::GetRayTracingSceneChecked(ERayTracingSceneLayer 
 	{
 		if (FScene* Scene = Family->Scene->GetRenderScene())
 		{
-			FRHIRayTracingScene* Result = Scene->RayTracingScene.GetRHIRayTracingScene(Layer, GetRayTracingSceneViewHandle());
+			FRHIRayTracingScene* Result = Scene->RayTracingScene.GetRHIRayTracingScene(Layer);
 			checkf(Result, TEXT("Ray tracing scene is expected to be created at this point."));
 			return Result;
 		}
@@ -1836,7 +1867,7 @@ FRDGBufferSRVRef FViewInfo::GetRayTracingSceneLayerViewChecked(ERayTracingSceneL
 	{
 		if (FScene* Scene = Family->Scene->GetRenderScene())
 		{
-			Result = Scene->RayTracingScene.GetLayerView(Layer, GetRayTracingSceneViewHandle());
+			Result = Scene->RayTracingScene.GetLayerView(Layer);
 		}
 	}
 	checkf(Result, TEXT("Ray tracing scene SRV is expected to be created at this point."));
@@ -1850,19 +1881,10 @@ FRDGBufferUAVRef FViewInfo::GetRayTracingInstanceHitCountUAV(FRDGBuilder& GraphB
 	{
 		if (FScene* Scene = Family->Scene->GetRenderScene())
 		{
-			return Scene->RayTracingScene.GetInstanceHitCountBufferUAV(ERayTracingSceneLayer::Base, GetRayTracingSceneViewHandle());
+			return Scene->RayTracingScene.GetInstanceHitCountBufferUAV(ERayTracingSceneLayer::Base);
 		}
-	}    
+	}
 	return nullptr;
 }
 
-FRHIRayTracingShader* GetRayTracingDefaultMissShader(const FGlobalShaderMap* ShaderMap)
-{
-	return ShaderMap->GetShader<FPackedMaterialClosestHitPayloadMS>().GetRayTracingShader();
-}
-
-FRHIRayTracingShader* GetRayTracingDefaultOpaqueShader(const FGlobalShaderMap* ShaderMap)
-{
-	return ShaderMap->GetShader<FOpaqueShadowHitGroup>().GetRayTracingShader();
-}
 #endif
